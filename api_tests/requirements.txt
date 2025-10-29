@@ -1,0 +1,3 @@
+basketball-reference-web-scraper
+requests
+python-dateutil

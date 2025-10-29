@@ -1,138 +1,196 @@
-# NBA Player Stat Prediction App
+# NBA Player Stats Tracker - PropsMadness Style
 
-## Project Vision
-A web application that predicts NBA player statistics for upcoming games, helping users make informed decisions about player performance before games happen.
+A PropsMadness-inspired web application for tracking and analyzing NBA player performance with interactive charts and comprehensive filtering.
 
-## Core Features
+## 🎯 Project Vision
 
-### 1. Today's Games Dashboard
-- Display all NBA games scheduled for today
-- Show matchup information (Team A vs Team B)
-- Display game time and venue
-- Quick preview of key predictions (optional: win probability, total points)
+Build a professional-grade NBA player stats tracking app that allows users to:
+- Browse today's NBA games
+- View detailed player performance history with interactive charts
+- Analyze stats across 20 different categories (Points, Assists, Rebounds, etc.)
+- Apply advanced filters (H2H matchups, Home/Away splits, Back-to-back games)
+- Track hit rates against betting lines
+- Make informed decisions about player performance
 
-### 2. Game Detail Page
-- Two tables (one per team) showing predicted stat lines for each player
-- Predicted stats should include:
-  - Points
-  - Rebounds
-  - Assists
-  - Steals
-  - Blocks
-  - Field Goal %
-  - 3-Point %
-  - Minutes played
-- Overall game prediction (winner, score prediction, confidence level)
-- Historical context (team recent performance, head-to-head stats)
+## ⭐ Design Reference
 
-## Tech Stack (FINALIZED)
+This app is based on the PropsMadness interface with detailed specifications documented in our project plan.
+
+## 🏗️ Tech Stack
 
 ### Frontend
-- **SvelteKit** - Modern, fast, small bundles
+- **SvelteKit** - Modern web framework
 - **Tailwind CSS** - Utility-first styling
-- **Skeleton UI** - Svelte-native component library
+- **Skeleton UI** - Svelte-native components
+- **Chart.js / Recharts** - Interactive performance charts
 
 ### Backend
-- **FastAPI (Python)** - Required for basketball_reference_web_scraper
-- **SQLAlchemy** - ORM for database operations
-- **basketball_reference_web_scraper** - Data source
-
-### Database
-- **PostgreSQL** - Relational database for smart caching
-- **Smart Caching Strategy:**
-  - First request → Scrape full career → Save to DB
-  - Subsequent requests → Query DB (100x faster!)
-  - Incremental updates → Only scrape new games
+- **FastAPI (Python)** - High-performance API
+- **SQLAlchemy** - Database ORM
+- **PostgreSQL** - Relational database
+- **basketball_reference_web_scraper** - NBA data source
 
 ### Deployment
-- **Railway** - Single platform for frontend + backend + database
+- **Railway** - Full-stack hosting platform
 
-## Development Phases
+## 📚 Documentation
 
-### Phase 1: MVP (Minimum Viable Product)
-- [ ] Set up project structure
-- [ ] Integrate NBA schedule API
-- [ ] Create basic UI for today's games
-- [ ] Implement simple prediction algorithm (e.g., season averages + recent form)
-- [ ] Build game detail page with predicted stats tables
+**Start here to understand the project:**
 
-### Phase 2: Enhanced Predictions
-- [ ] Improve prediction algorithm with more factors
-- [ ] Add historical accuracy tracking
-- [ ] Include injury reports and player status
-- [ ] Add matchup-specific adjustments
+### 📖 Essential Reading
+1. **[docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)** ⭐ **THE NORTH STAR**
+   - Complete PropsMadness UI/UX specifications
+   - All component details (sidebar, header, chart, filters)
+   - Data requirements
+   - Implementation phases
 
-### Phase 3: Polish & Features
-- [ ] Improve UI/UX
-- [ ] Add filtering and sorting
-- [ ] Display confidence intervals
-- [ ] Add player comparison features
-- [ ] Performance optimizations
+2. **[docs/ROADMAP.md](docs/ROADMAP.md)**
+   - 12-week development timeline
+   - Phased milestones and tasks
+   - Success criteria for each phase
 
-## Getting Started
+### 🔧 Implementation Guides
+3. **[docs/DATABASE_SCHEMA.md](docs/DATABASE_SCHEMA.md)**
+   - Complete database design
+   - Table structures and relationships
+   - Query patterns
 
-### 📚 Documentation Overview
+4. **[docs/IMPLEMENTATION_GUIDE.md](docs/IMPLEMENTATION_GUIDE.md)**
+   - Step-by-step build guide
+   - Code examples
+   - Smart caching strategy
 
-**Start Here:**
-- **[QUICK_START.md](QUICK_START.md)** - Summary and first steps
-- **[ARCHITECTURE_DECISIONS.md](ARCHITECTURE_DECISIONS.md)** - All tech decisions (COMPLETE ✅)
+### 📘 Reference Documentation
+5. **[docs/ARCHITECTURE_DECISIONS.md](docs/ARCHITECTURE_DECISIONS.md)**
+   - All tech stack decisions
+   - Rationale and trade-offs
 
-**Implementation:**
-- **[IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md)** - Step-by-step build guide with complete code
-- **[DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)** - Complete database design
+6. **[docs/DATA_SOURCE_GUIDE.md](docs/DATA_SOURCE_GUIDE.md)**
+   - Basketball Reference API details
+   - Available data and limitations
 
-**Reference:**
-- **[TECHNICAL_REQUIREMENTS.md](TECHNICAL_REQUIREMENTS.md)** - Detailed requirements
-- **[ROADMAP.md](ROADMAP.md)** - Development phases
-- **[DATA_SOURCE_GUIDE.md](DATA_SOURCE_GUIDE.md)** - Basketball Reference scraper info
-- **[CLAUDE_CODE_PROMPTS.md](CLAUDE_CODE_PROMPTS.md)** - Prompts for Claude Code
+7. **[docs/INDEX.md](docs/INDEX.md)**
+   - Complete documentation index
+   - Quick navigation guide
 
-### 🚀 Quick Start
-
-1. **Read** [QUICK_START.md](QUICK_START.md) for overview
-2. **Set up** PostgreSQL database (see [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md))
-3. **Build** backend following [IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md)
-4. **Build** frontend using provided examples
-5. **Deploy** to Railway
+## 🚀 Quick Start
 
 ### Prerequisites
 - Python 3.10+
 - Node.js 18+
 - PostgreSQL 15+
-- basketball_reference_web_scraper Python library
 
-## Project Structure
-```
-/
-├── frontend/          # UI components and pages
-├── backend/           # API and business logic
-├── models/            # Prediction algorithms
-├── data/              # Data fetching and processing
-├── docs/              # Additional documentation
-└── tests/             # Test files
+### Development Setup
+
+**1. Clone the repository**
+```bash
+git clone <repository-url>
+cd basketball_predictor
 ```
 
-## Data Flow
-1. User opens app → Fetch today's NBA schedule
-2. User selects game → Fetch team rosters and recent stats
-3. Run prediction algorithm → Generate stat predictions
-4. Display results in formatted tables
+**2. Explore the API (Current Phase)**
+```bash
+cd api_tests
+source venv/bin/activate
+pip install -r requirements.txt
+python test_schedule.py
+python test_player_stats.py
+```
 
-## Notes & Decisions to Make
-- **Prediction complexity:** Start simple or go straight to ML?
-- **Real-time vs cached:** How often to refresh data?
-- **Mobile-first:** Should we prioritize mobile design?
-- **Monetization:** Free tool or premium features?
+**3. Set up PostgreSQL**
+```bash
+# macOS with Homebrew
+brew install postgresql@15
+brew services start postgresql@15
+createdb nba_predictions
+```
 
-## Future Enhancements
-- User accounts and prediction history
-- Compare predictions vs actual results
-- Fantasy basketball integration
-- Props betting insights
-- Player vs player comparisons
-- Historical game data visualization
+**4. Next Steps**
+See [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) Phase 0 for detailed setup instructions.
+
+## 🎨 Key Features
+
+### Core Interface (Phase 1 - Weeks 1-4)
+- ✅ **Left Sidebar Navigation**
+  - All games view
+  - Search by player/team
+  - Single game roster view
+
+- ✅ **Top Navigation**
+  - 20 stat categories
+  - Real-time category switching
+
+- ✅ **Player Header**
+  - Season average
+  - Graph average (filtered)
+  - Hit rate calculation
+
+- ✅ **Interactive Performance Chart**
+  - Bar chart with game-by-game performance
+  - Draggable betting line
+  - Real-time hit rate updates
+  - Game hover tooltips
+
+- ✅ **Filter Controls**
+  - Season selector (23/24, 24/25, 25/26, All)
+  - Games counter (L15, Max)
+
+### Advanced Features (Phase 2 - Weeks 5-7)
+- 🔄 **Splits Filters**
+  - H2H (Head-to-head)
+  - Home/Away
+  - Regular season/Playoffs
+  - Back-to-back games
+
+- 🔄 **Betting Lines Integration**
+  - Real betting lines display
+  - Historical closing lines
+
+### Secondary Components (Phase 3 - Weeks 8-10)
+- 📊 **Shooting Zones** (for Points category)
+- 👥 **Similar Players** analysis
+- 🎯 **Play Type Breakdown** (Transition, PnR, etc.)
+- 📈 **Advanced Filters** with chart overlays
+
+## 📊 Data Requirements
+
+### Core Data (MVP)
+- **Players**: 600+ active NBA players
+- **Games**: Schedule and results
+- **Game Logs**: Player performance per game
+- **Teams**: 30 NBA teams
+- **Betting Lines**: Historical and current lines
+
+### Smart Caching Strategy
+1. **First Request**: Scrape full player history → Store in PostgreSQL
+2. **Subsequent Requests**: Query database (100x faster)
+3. **Incremental Updates**: Only scrape new games when needed
+
+## 🗓️ Development Timeline
+
+- **Week 1**: API exploration, database setup, project scaffolding
+- **Weeks 2-4**: Core MVP (sidebar, chart, basic filters)
+- **Weeks 5-7**: Advanced filters and betting lines
+- **Weeks 8-10**: Secondary components
+- **Weeks 11-12**: Polish, optimization, deployment
+
+**Target Launch**: Week 12
+
+## 📈 Current Status
+
+**Current Phase**: Phase 0 - Foundation & API Exploration
+**Next Milestone**: Complete API testing and database setup
+**Progress**: 📊 Planning Complete | 🚧 Development Starting
+
+## 🤝 Contributing
+
+This is currently a personal project. Documentation is structured to be comprehensive for solo development and future collaboration.
+
+## 📝 License
+
+TBD
 
 ---
 
-**Status:** Planning Phase
-**Last Updated:** October 2025
+**Last Updated**: October 29, 2025
+**Version**: 2.0 (PropsMadness Edition)
