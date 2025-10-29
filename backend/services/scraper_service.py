@@ -1,0 +1,330 @@
+from basketball_reference_web_scraper import client
+from basketball_reference_web_scraper.data import OutputType, Team
+from sqlalchemy.orm import Session
+from datetime import datetime, timedelta, date
+from typing import List, Optional
+import time
+import models
+
+
+class ScraperService:
+    """Smart scraping service that uses database as cache"""
+
+    def __init__(self, db: Session):
+        self.db = db
+        self.current_season = 2025  # Update each season
+
+    def get_or_scrape_player_data(self, player_slug: str) -> models.Player:
+        """
+        Main entry point: Get player data from DB or scrape if needed.
+        This is the 'smart caching' logic!
+        """
+        # Check if player exists in database
+        player = self.db.query(models.Player).filter(
+            models.Player.player_slug == player_slug
+        ).first()
+
+        if not player:
+            # Player doesn't exist - scrape full career
+            print(f"🔍 Player {player_slug} not found in DB. Scraping full career...")
+            player = self._scrape_full_player_career(player_slug)
+        elif not player.career_scraped:
+            # Player exists but career not fully scraped
+            print(f"🔍 Player {player_slug} needs full career scrape...")
+            player = self._scrape_full_player_career(player_slug)
+        elif self._needs_update(player):
+            # Player exists, but data might be stale
+            print(f"🔄 Player {player_slug} data is stale. Scraping new games...")
+            player = self._scrape_incremental_update(player)
+        else:
+            print(f"✅ Player {player_slug} data is current. Using cache!")
+
+        return player
+
+    def _needs_update(self, player: models.Player) -> bool:
+        """Check if player data needs updating"""
+        if not player.last_game_date:
+            return True
+
+        # If last game was more than 1 day ago, check for new games
+        days_since_update = (date.today() - player.last_game_date).days
+        return days_since_update > 1
+
+    def _scrape_full_player_career(self, player_slug: str) -> models.Player:
+        """Scrape entire career for a player (first-time scrape)"""
+        start_time = time.time()
+
+        try:
+            # Scrape all career games
+            print(f"  Fetching game logs for {player_slug}...")
+            game_logs = client.regular_season_player_box_scores(
+                player_identifier=player_slug
+            )
+
+            if not game_logs:
+                raise ValueError(f"No data found for player {player_slug}")
+
+            # Create or update player record
+            player = self.db.query(models.Player).filter(
+                models.Player.player_slug == player_slug
+            ).first()
+
+            if not player:
+                # Extract player info from first game log
+                first_game = game_logs[0]
+                player = models.Player(
+                    player_slug=player_slug,
+                    full_name=first_game.get('name', player_slug),
+                    career_scraped=True,
+                    last_scraped_at=datetime.utcnow()
+                )
+                self.db.add(player)
+                self.db.flush()  # Get the player ID
+
+            # Insert all game logs
+            games_added = 0
+            for game_data in game_logs:
+                game_log = self._create_game_log_from_scrape(player.id, game_data)
+                if game_log:
+                    self.db.merge(game_log)  # Use merge to handle duplicates
+                    games_added += 1
+
+            # Update player metadata
+            player.career_scraped = True
+            player.last_scraped_at = datetime.utcnow()
+            if game_logs:
+                # Find the most recent game date
+                dates = [g.game_date for g in game_logs if hasattr(g, 'game_date')]
+                if dates:
+                    player.last_game_date = max(dates)
+
+            self.db.commit()
+
+            duration = time.time() - start_time
+            print(f"✅ Scraped {games_added} games for {player_slug} in {duration:.1f}s")
+
+            # Log the scraping activity
+            self._log_scrape('player', player_slug, 'full_career', games_added, 'success', duration)
+
+            return player
+
+        except Exception as e:
+            self.db.rollback()
+            duration = time.time() - start_time
+            print(f"❌ Error scraping {player_slug}: {e}")
+            self._log_scrape('player', player_slug, 'full_career', 0, 'failed', duration, str(e))
+            raise
+
+    def _scrape_incremental_update(self, player: models.Player) -> models.Player:
+        """Scrape only new games since last update"""
+        start_time = time.time()
+
+        try:
+            # Get all games for current season
+            all_games = client.regular_season_player_box_scores(
+                player_identifier=player.player_slug
+            )
+
+            # Filter for games after last_game_date
+            new_games = [
+                g for g in all_games
+                if hasattr(g, 'game_date') and g.game_date > player.last_game_date
+            ]
+
+            if new_games:
+                games_added = 0
+                for game_data in new_games:
+                    game_log = self._create_game_log_from_scrape(player.id, game_data)
+                    if game_log:
+                        self.db.merge(game_log)
+                        games_added += 1
+
+                # Update player metadata
+                player.last_scraped_at = datetime.utcnow()
+                dates = [g.game_date for g in new_games if hasattr(g, 'game_date')]
+                if dates:
+                    player.last_game_date = max(dates)
+
+                self.db.commit()
+
+                duration = time.time() - start_time
+                print(f"✅ Updated {player.player_slug} with {games_added} new games in {duration:.1f}s")
+                self._log_scrape('player', player.player_slug, 'incremental', games_added, 'success', duration)
+            else:
+                duration = time.time() - start_time
+                print(f"✅ {player.player_slug} already up to date")
+                self._log_scrape('player', player.player_slug, 'incremental', 0, 'success', duration)
+
+            return player
+
+        except Exception as e:
+            self.db.rollback()
+            duration = time.time() - start_time
+            print(f"❌ Error updating {player.player_slug}: {e}")
+            self._log_scrape('player', player.player_slug, 'incremental', 0, 'failed', duration, str(e))
+            raise
+
+    def _create_game_log_from_scrape(self, player_id: int, game_data) -> Optional[models.GameLog]:
+        """Convert scraped game data to GameLog model"""
+        try:
+            # Handle both dict and object access patterns
+            def get_val(key, default=None):
+                if isinstance(game_data, dict):
+                    return game_data.get(key, default)
+                return getattr(game_data, key, default)
+
+            # Calculate derived stats
+            points = get_val('points', 0) or 0
+            rebounds = (get_val('offensive_rebounds', 0) or 0) + (get_val('defensive_rebounds', 0) or 0)
+            assists = get_val('assists', 0) or 0
+            steals = get_val('steals', 0) or 0
+            blocks = get_val('blocks', 0) or 0
+
+            # Check for double/triple double
+            stats_10_plus = sum([
+                points >= 10,
+                rebounds >= 10,
+                assists >= 10,
+                steals >= 10,
+                blocks >= 10
+            ])
+
+            double_double = stats_10_plus >= 2
+            triple_double = stats_10_plus >= 3
+
+            # Get opponent (handle enum or string)
+            opponent = get_val('opponent', 'UNK')
+            if hasattr(opponent, 'value'):
+                opponent = opponent.value
+
+            # Get team
+            team = get_val('team', '')
+            if hasattr(team, 'value'):
+                team = team.value
+
+            return models.GameLog(
+                player_id=player_id,
+                game_date=get_val('game_date') or get_val('date'),
+                season=get_val('season', self.current_season),
+                opponent=str(opponent)[:3] if opponent else 'UNK',
+                is_home_game=get_val('location', 'HOME') != 'AWAY',
+                minutes_played=float(get_val('seconds_played', 0) or 0) / 60.0,
+                points=points,
+                rebounds=rebounds,
+                assists=assists,
+                steals=steals,
+                blocks=blocks,
+                turnovers=get_val('turnovers', 0) or 0,
+                personal_fouls=get_val('personal_fouls', 0) or 0,
+                field_goals_made=get_val('made_field_goals', 0) or 0,
+                field_goals_attempted=get_val('attempted_field_goals', 0) or 0,
+                three_pointers_made=get_val('made_three_point_field_goals', 0) or 0,
+                three_pointers_attempted=get_val('attempted_three_point_field_goals', 0) or 0,
+                free_throws_made=get_val('made_free_throws', 0) or 0,
+                free_throws_attempted=get_val('attempted_free_throws', 0) or 0,
+                offensive_rebounds=get_val('offensive_rebounds', 0) or 0,
+                defensive_rebounds=get_val('defensive_rebounds', 0) or 0,
+                # Derived stats
+                pts_plus_ast=points + assists,
+                pts_plus_reb=points + rebounds,
+                reb_plus_ast=rebounds + assists,
+                pts_reb_ast=points + rebounds + assists,
+                stl_plus_blk=steals + blocks,
+                double_double=double_double,
+                triple_double=triple_double,
+                did_not_play=(get_val('seconds_played', 0) or 0) == 0
+            )
+        except Exception as e:
+            print(f"  Error creating game log: {e}")
+            return None
+
+    def scrape_today_schedule(self) -> List[models.Game]:
+        """Scrape today's NBA schedule"""
+        start_time = time.time()
+
+        try:
+            schedule = client.season_schedule(season_end_year=self.current_season)
+            today = date.today()
+
+            today_games = []
+            for game_data in schedule:
+                # Handle both dict and object patterns
+                def get_val(key, default=None):
+                    if isinstance(game_data, dict):
+                        return game_data.get(key, default)
+                    return getattr(game_data, key, default)
+
+                game_date = get_val('start_time')
+                if hasattr(game_date, 'date'):
+                    game_date = game_date.date()
+                elif isinstance(game_date, datetime):
+                    game_date = game_date.date()
+
+                if game_date == today:
+                    today_games.append(game_data)
+
+            games = []
+            for game_data in today_games:
+                def get_val(key, default=None):
+                    if isinstance(game_data, dict):
+                        return game_data.get(key, default)
+                    return getattr(game_data, key, default)
+
+                home_team = get_val('home_team', '')
+                away_team = get_val('away_team', '')
+
+                if hasattr(home_team, 'value'):
+                    home_team = home_team.value
+                if hasattr(away_team, 'value'):
+                    away_team = away_team.value
+
+                start_time_val = get_val('start_time')
+                if isinstance(start_time_val, datetime):
+                    start_time_str = start_time_val.strftime("%H:%M")
+                else:
+                    start_time_str = str(start_time_val)
+
+                game = models.Game(
+                    game_date=today,
+                    season=self.current_season,
+                    home_team=str(home_team)[:3],
+                    away_team=str(away_team)[:3],
+                    start_time=start_time_str,
+                    game_status='scheduled'
+                )
+                self.db.merge(game)
+                games.append(game)
+
+            self.db.commit()
+
+            duration = time.time() - start_time
+            print(f"✅ Scraped {len(games)} games for today in {duration:.1f}s")
+            self._log_scrape('schedule', 'today', 'schedule', len(games), 'success', duration)
+
+            return games
+
+        except Exception as e:
+            self.db.rollback()
+            duration = time.time() - start_time
+            print(f"❌ Error scraping schedule: {e}")
+            self._log_scrape('schedule', 'today', 'schedule', 0, 'failed', duration, str(e))
+            raise
+
+    def _log_scrape(self, entity_type: str, entity_id: str, scrape_type: str,
+                   games_scraped: int, status: str, duration: float, error: str = None):
+        """Log scraping activity"""
+        try:
+            log = models.ScrapingLog(
+                entity_type=entity_type,
+                entity_id=entity_id,
+                scrape_type=scrape_type,
+                games_scraped=games_scraped,
+                status=status,
+                error_message=error,
+                duration_seconds=duration
+            )
+            self.db.add(log)
+            self.db.commit()
+        except Exception as e:
+            print(f"  Warning: Could not log scrape activity: {e}")
+            self.db.rollback()
