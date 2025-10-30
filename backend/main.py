@@ -84,13 +84,70 @@ def get_today_games(
                     "home_team": g.home_team,
                     "away_team": g.away_team,
                     "start_time": g.start_time,
-                    "status": g.game_status
+                    "status": g.game_status,
+                    "home_score": g.home_score,
+                    "away_score": g.away_score
                 }
                 for g in games
             ]
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching schedule: {str(e)}")
+
+
+@app.get("/api/games/date/{date}")
+def get_games_by_date(
+    date: str,
+    timezone: Optional[str] = Query(default=None, description="IANA timezone (e.g., 'America/New_York'). Defaults to EST."),
+    db: Session = Depends(get_db)
+):
+    """
+    Get NBA games for a specific date.
+    Date format: YYYY-MM-DD (e.g., '2025-10-29')
+    Times are converted from UTC to the specified timezone (defaults to EST).
+    """
+    try:
+        scraper = ScraperService(db, timezone=timezone)
+        games = scraper.scrape_schedule_by_date(date)
+
+        return {
+            "date": date,
+            "count": len(games),
+            "timezone": timezone or "America/New_York (default)",
+            "games": [
+                {
+                    "id": g.id,
+                    "date": g.game_date.isoformat(),
+                    "home_team": g.home_team,
+                    "away_team": g.away_team,
+                    "start_time": g.start_time,
+                    "status": g.game_status,
+                    "home_score": g.home_score,
+                    "away_score": g.away_score
+                }
+                for g in games
+            ]
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid date format. Use YYYY-MM-DD: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching schedule: {str(e)}")
+
+
+@app.get("/api/players/search")
+def search_players(q: str = Query(..., min_length=2), db: Session = Depends(get_db)):
+    """Search for players by name"""
+    try:
+        service = PlayerService(db)
+        results = service.search_players(q)
+
+        return {
+            "query": q,
+            "count": len(results),
+            "results": results
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error searching players: {str(e)}")
 
 
 @app.get("/api/players/{player_slug}")
@@ -114,22 +171,6 @@ def get_player(player_slug: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching player: {str(e)}")
-
-
-@app.get("/api/players/search")
-def search_players(q: str = Query(..., min_length=2), db: Session = Depends(get_db)):
-    """Search for players by name"""
-    try:
-        service = PlayerService(db)
-        results = service.search_players(q)
-
-        return {
-            "query": q,
-            "count": len(results),
-            "results": results
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error searching players: {str(e)}")
 
 
 @app.get("/api/players/{player_slug}/stats")
@@ -307,6 +348,123 @@ def get_scraping_log(limit: int = Query(default=20, le=100), db: Session = Depen
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching logs: {str(e)}")
+
+
+# ===== ADMIN / BULK ENDPOINTS =====
+
+@app.get("/api/admin/db/stats")
+def get_database_stats(db: Session = Depends(get_db)):
+    """
+    Get database statistics - see what's currently stored.
+    Useful for checking if bulk operations worked.
+    """
+    try:
+        stats = {
+            "players": {
+                "total": db.query(models.Player).count(),
+                "scraped": db.query(models.Player).filter(models.Player.career_scraped == True).count(),
+                "active": db.query(models.Player).filter(models.Player.is_active == True).count(),
+            },
+            "game_logs": {
+                "total": db.query(models.GameLog).count(),
+            },
+            "games": {
+                "total": db.query(models.Game).count(),
+                "by_status": {}
+            },
+            "season_averages": {
+                "total": db.query(models.SeasonAverage).count(),
+            },
+            "scraping_logs": {
+                "total": db.query(models.ScrapingLog).count(),
+                "successful": db.query(models.ScrapingLog).filter(models.ScrapingLog.status == "success").count(),
+                "failed": db.query(models.ScrapingLog).filter(models.ScrapingLog.status == "error").count(),
+            }
+        }
+
+        return stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching database stats: {str(e)}")
+
+
+@app.get("/api/admin/db/players")
+def list_all_players(
+    limit: int = Query(default=50, le=500),
+    offset: int = Query(default=0, ge=0),
+    scraped_only: bool = Query(default=False, description="Only show players with scraped data"),
+    db: Session = Depends(get_db)
+):
+    """
+    List all players in the database.
+    Useful for seeing what players are available.
+    """
+    try:
+        query = db.query(models.Player)
+
+        if scraped_only:
+            query = query.filter(models.Player.career_scraped == True)
+
+        total = query.count()
+        players = query.offset(offset).limit(limit).all()
+
+        return {
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+            "count": len(players),
+            "players": [
+                {
+                    "slug": p.player_slug,
+                    "name": p.full_name,
+                    "team": p.current_team,
+                    "position": p.position,
+                    "is_active": p.is_active,
+                    "career_scraped": p.career_scraped,
+                    "last_game_date": p.last_game_date.isoformat() if p.last_game_date else None,
+                    "last_scraped": p.last_scraped_at.isoformat() if p.last_scraped_at else None
+                }
+                for p in players
+            ]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error listing players: {str(e)}")
+
+
+@app.get("/api/admin/db/games")
+def list_all_games(
+    limit: int = Query(default=50, le=500),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db)
+):
+    """
+    List all games in the database.
+    Useful for seeing what games are scheduled.
+    """
+    try:
+        total = db.query(models.Game).count()
+        games = db.query(models.Game).order_by(
+            models.Game.game_date.desc()
+        ).offset(offset).limit(limit).all()
+
+        return {
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+            "count": len(games),
+            "games": [
+                {
+                    "id": g.id,
+                    "date": g.game_date.isoformat(),
+                    "home_team": g.home_team,
+                    "away_team": g.away_team,
+                    "start_time": g.start_time,
+                    "status": g.game_status
+                }
+                for g in games
+            ]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error listing games: {str(e)}")
 
 
 if __name__ == "__main__":

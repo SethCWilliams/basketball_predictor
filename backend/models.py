@@ -63,7 +63,6 @@ class Game(Base):
     away_team = Column(String(3), nullable=False)
 
     start_time = Column(String(20))
-    venue = Column(String(100))
 
     # Results (null if game hasn't happened)
     home_score = Column(Integer)
