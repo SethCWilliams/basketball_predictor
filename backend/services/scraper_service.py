@@ -5,14 +5,19 @@ from datetime import datetime, timedelta, date
 from typing import List, Optional
 import time
 import models
+import sys
+sys.path.insert(0, '..')
+from utils import get_current_season_year, get_today_local, utc_to_local, format_game_time
 
 
 class ScraperService:
     """Smart scraping service that uses database as cache"""
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, timezone: Optional[str] = None):
         self.db = db
-        self.current_season = 2025  # Update each season
+        self.timezone = timezone
+        # Automatically detect current season (2025-26 = 2026, 2026-27 = 2027, etc.)
+        self.current_season = get_current_season_year()
 
     def get_or_scrape_player_data(self, player_slug: str) -> models.Player:
         """
@@ -58,7 +63,8 @@ class ScraperService:
             # Scrape all career games
             print(f"  Fetching game logs for {player_slug}...")
             game_logs = client.regular_season_player_box_scores(
-                player_identifier=player_slug
+                player_identifier=player_slug,
+                season_end_year=self.current_season
             )
 
             if not game_logs:
@@ -122,7 +128,8 @@ class ScraperService:
         try:
             # Get all games for current season
             all_games = client.regular_season_player_box_scores(
-                player_identifier=player.player_slug
+                player_identifier=player.player_slug,
+                season_end_year=self.current_season
             )
 
             # Filter for games after last_game_date
@@ -239,12 +246,16 @@ class ScraperService:
             return None
 
     def scrape_today_schedule(self) -> List[models.Game]:
-        """Scrape today's NBA schedule"""
-        start_time = time.time()
+        """
+        Scrape today's NBA schedule.
+        Note: Times from API are in UTC and need to be converted to user's timezone.
+        """
+        start_time_scrape = time.time()
 
         try:
             schedule = client.season_schedule(season_end_year=self.current_season)
-            today = date.today()
+            # Get today's date in user's timezone (not UTC)
+            today = get_today_local(self.timezone)
 
             today_games = []
             for game_data in schedule:
@@ -254,14 +265,17 @@ class ScraperService:
                         return game_data.get(key, default)
                     return getattr(game_data, key, default)
 
-                game_date = get_val('start_time')
-                if hasattr(game_date, 'date'):
-                    game_date = game_date.date()
-                elif isinstance(game_date, datetime):
-                    game_date = game_date.date()
+                game_datetime = get_val('start_time')
+                if game_datetime:
+                    # Convert UTC time to user's local timezone
+                    if isinstance(game_datetime, datetime):
+                        local_datetime = utc_to_local(game_datetime, self.timezone)
+                        game_date = local_datetime.date()
+                    else:
+                        game_date = game_datetime
 
-                if game_date == today:
-                    today_games.append(game_data)
+                    if game_date == today:
+                        today_games.append(game_data)
 
             games = []
             for game_data in today_games:
@@ -278,26 +292,39 @@ class ScraperService:
                 if hasattr(away_team, 'value'):
                     away_team = away_team.value
 
+                # Format time in user's timezone
                 start_time_val = get_val('start_time')
                 if isinstance(start_time_val, datetime):
-                    start_time_str = start_time_val.strftime("%H:%M")
+                    start_time_str = format_game_time(start_time_val, self.timezone)
                 else:
                     start_time_str = str(start_time_val)
 
-                game = models.Game(
-                    game_date=today,
-                    season=self.current_season,
-                    home_team=str(home_team)[:3],
-                    away_team=str(away_team)[:3],
-                    start_time=start_time_str,
-                    game_status='scheduled'
-                )
-                self.db.merge(game)
-                games.append(game)
+                # Check if game already exists (avoid duplicates)
+                existing_game = self.db.query(models.Game).filter(
+                    models.Game.game_date == today,
+                    models.Game.home_team == str(home_team)[:3],
+                    models.Game.away_team == str(away_team)[:3]
+                ).first()
+
+                if not existing_game:
+                    game = models.Game(
+                        game_date=today,
+                        season=self.current_season,
+                        home_team=str(home_team)[:3],
+                        away_team=str(away_team)[:3],
+                        start_time=start_time_str,
+                        game_status='scheduled'
+                    )
+                    self.db.add(game)
+                    games.append(game)
+                else:
+                    # Update start time if it changed
+                    existing_game.start_time = start_time_str
+                    games.append(existing_game)
 
             self.db.commit()
 
-            duration = time.time() - start_time
+            duration = time.time() - start_time_scrape
             print(f"✅ Scraped {len(games)} games for today in {duration:.1f}s")
             self._log_scrape('schedule', 'today', 'schedule', len(games), 'success', duration)
 
@@ -305,7 +332,7 @@ class ScraperService:
 
         except Exception as e:
             self.db.rollback()
-            duration = time.time() - start_time
+            duration = time.time() - start_time_scrape
             print(f"❌ Error scraping schedule: {e}")
             self._log_scrape('schedule', 'today', 'schedule', 0, 'failed', duration, str(e))
             raise

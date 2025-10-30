@@ -6,6 +6,7 @@ from database import get_db, engine, Base
 import models
 from services.player_service import PlayerService
 from services.scraper_service import ScraperService
+from utils import get_current_season_year, season_display_name
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -29,10 +30,13 @@ app.add_middleware(
 @app.get("/")
 def read_root():
     """API health check"""
+    current_season = get_current_season_year()
     return {
         "message": "NBA Stats Tracker API",
         "status": "running",
-        "version": "1.0.0"
+        "version": "1.0.0",
+        "current_season": season_display_name(current_season),
+        "season_end_year": current_season
     }
 
 
@@ -57,15 +61,22 @@ def health_check(db: Session = Depends(get_db)):
 
 
 @app.get("/api/games/today")
-def get_today_games(db: Session = Depends(get_db)):
-    """Get today's NBA games"""
+def get_today_games(
+    timezone: Optional[str] = Query(default=None, description="IANA timezone (e.g., 'America/New_York'). Defaults to EST."),
+    db: Session = Depends(get_db)
+):
+    """
+    Get today's NBA games.
+    Times are converted from UTC to the specified timezone (defaults to EST).
+    """
     try:
-        scraper = ScraperService(db)
+        scraper = ScraperService(db, timezone=timezone)
         games = scraper.scrape_today_schedule()
 
         return {
             "date": "today",
             "count": len(games),
+            "timezone": timezone or "America/New_York (default)",
             "games": [
                 {
                     "id": g.id,
