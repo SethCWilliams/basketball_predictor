@@ -114,3 +114,46 @@ def season_display_name(season_end_year: int) -> str:
     """
     start_year = season_end_year - 1
     return f"{start_year}-{str(season_end_year)[-2:]}"
+
+
+def validate_season(season_end_year: Optional[int] = None) -> int:
+    """
+    Validate that a season is within allowed range (current + 2 previous seasons).
+
+    Args:
+        season_end_year: Season to validate (None = current season)
+
+    Returns:
+        Valid season end year
+
+    Raises:
+        ValueError: If season is outside allowed range
+    """
+    current_season = get_current_season_year()
+
+    # Default to current season if not specified
+    if season_end_year is None:
+        return current_season
+
+    # Allow current season + 2 previous seasons
+    min_allowed = current_season - 2
+    max_allowed = current_season
+
+    if season_end_year < min_allowed or season_end_year > max_allowed:
+        raise ValueError(
+            f"Season {season_display_name(season_end_year)} is outside allowed range. "
+            f"Only seasons {season_display_name(min_allowed)} through {season_display_name(max_allowed)} are supported."
+        )
+
+    return season_end_year
+
+
+def get_allowed_seasons() -> list[int]:
+    """
+    Get list of allowed season end years (current + 2 previous).
+
+    Returns:
+        List of season end years [2024, 2025, 2026] for example
+    """
+    current_season = get_current_season_year()
+    return [current_season - 2, current_season - 1, current_season]

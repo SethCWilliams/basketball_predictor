@@ -245,6 +245,92 @@ class ScraperService:
             print(f"  Error creating game log: {e}")
             return None
 
+    def scrape_full_season_schedule(self, season_end_year: int) -> dict:
+        """
+        Scrape and store the entire season schedule.
+        Returns summary of games added/updated.
+
+        Args:
+            season_end_year: Season to scrape (e.g., 2026 for 2025-26 season)
+
+        Returns:
+            Dict with summary: {total: int, new: int, updated: int}
+        """
+        start_time_scrape = time.time()
+
+        try:
+            print(f"📅 Scraping full schedule for {season_end_year} season...")
+            schedule = client.season_schedule(season_end_year=season_end_year)
+
+            total_games = len(schedule)
+            new_games = 0
+            updated_games = 0
+
+            # Group games by date for efficient processing
+            games_by_date = {}
+            for game_data in schedule:
+                def get_val(key, default=None):
+                    if isinstance(game_data, dict):
+                        return game_data.get(key, default)
+                    return getattr(game_data, key, default)
+
+                game_datetime = get_val('start_time')
+                if game_datetime and isinstance(game_datetime, datetime):
+                    local_datetime = utc_to_local(game_datetime, self.timezone)
+                    game_date = local_datetime.date()
+
+                    if game_date not in games_by_date:
+                        games_by_date[game_date] = []
+                    games_by_date[game_date].append(game_data)
+
+            # Process each date
+            for game_date, games_data in games_by_date.items():
+                for game_data in games_data:
+                    def get_val(key, default=None):
+                        if isinstance(game_data, dict):
+                            return game_data.get(key, default)
+                        return getattr(game_data, key, default)
+
+                    home_team = get_val('home_team', '')
+                    away_team = get_val('away_team', '')
+
+                    if hasattr(home_team, 'value'):
+                        home_team = home_team.value
+                    if hasattr(away_team, 'value'):
+                        away_team = away_team.value
+
+                    # Check if game exists
+                    existing_game = self.db.query(models.Game).filter(
+                        models.Game.game_date == game_date,
+                        models.Game.home_team == str(home_team)[:3],
+                        models.Game.away_team == str(away_team)[:3]
+                    ).first()
+
+                    if existing_game:
+                        updated_games += 1
+                    else:
+                        new_games += 1
+
+                # Process and store all games for this date
+                self._process_and_store_games(games_data, game_date)
+
+            duration = time.time() - start_time_scrape
+            print(f"✅ Season schedule scraped in {duration:.1f}s: {total_games} total, {new_games} new, {updated_games} updated")
+            self._log_scrape('schedule', f'season_{season_end_year}', 'full_season', total_games, 'success', duration)
+
+            return {
+                "total": total_games,
+                "new": new_games,
+                "updated": updated_games
+            }
+
+        except Exception as e:
+            self.db.rollback()
+            duration = time.time() - start_time_scrape
+            print(f"❌ Error scraping season {season_end_year} schedule: {e}")
+            self._log_scrape('schedule', f'season_{season_end_year}', 'full_season', 0, 'error', duration, str(e))
+            raise
+
     def scrape_schedule_by_date(self, target_date: date) -> List[models.Game]:
         """
         Scrape NBA schedule for a specific date.

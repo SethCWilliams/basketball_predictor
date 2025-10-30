@@ -6,7 +6,7 @@ from database import get_db, engine, Base
 import models
 from services.player_service import PlayerService
 from services.scraper_service import ScraperService
-from utils import get_current_season_year, season_display_name
+from utils import get_current_season_year, season_display_name, validate_season, get_allowed_seasons
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -134,6 +134,49 @@ def get_games_by_date(
         raise HTTPException(status_code=500, detail=f"Error fetching schedule: {str(e)}")
 
 
+@app.post("/api/games/season/populate")
+def populate_season_schedule(
+    season: Optional[int] = Query(default=None, description="Season end year (e.g., 2026 for 2025-26). Defaults to current season."),
+    timezone: Optional[str] = Query(default=None, description="IANA timezone. Defaults to EST."),
+    db: Session = Depends(get_db)
+):
+    """
+    Bulk populate the games table with an entire season's schedule.
+    Only allows current season + 2 previous seasons.
+
+    This will scrape all ~1200 games for the season and store them in the database.
+    Games already in the database will be updated with fresh data.
+
+    Example: POST /api/games/season/populate?season=2026
+    """
+    try:
+        # Validate season (will raise ValueError if outside allowed range)
+        season_year = validate_season(season)
+
+        scraper = ScraperService(db, timezone=timezone)
+
+        # Use the specified season instead of scraper's default current season
+        original_season = scraper.current_season
+        scraper.current_season = season_year
+
+        summary = scraper.scrape_full_season_schedule(season_year)
+
+        # Restore original season
+        scraper.current_season = original_season
+
+        return {
+            "season": season_display_name(season_year),
+            "season_end_year": season_year,
+            "summary": summary,
+            "allowed_seasons": [season_display_name(s) for s in get_allowed_seasons()]
+        }
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error populating season schedule: {str(e)}")
+
+
 @app.get("/api/players/search")
 def search_players(q: str = Query(..., min_length=2), db: Session = Depends(get_db)):
     """Search for players by name"""
@@ -178,7 +221,7 @@ def get_player_stats(
     player_slug: str,
     stat_category: str = Query(default="points", description="Stat category to analyze"),
     games: int = Query(default=15, ge=1, le=82, description="Number of recent games"),
-    season: Optional[int] = Query(default=None, description="Filter by season"),
+    season: Optional[int] = Query(default=None, description="Season end year (e.g., 2026). Only current + 2 previous seasons allowed."),
     opponent: Optional[str] = Query(default=None, description="Filter by opponent"),
     is_home: Optional[bool] = Query(default=None, description="Filter by home/away"),
     db: Session = Depends(get_db)
@@ -186,23 +229,25 @@ def get_player_stats(
     """
     Get comprehensive player stats for the chart view.
     Includes: season avg, graph avg, recent games, and chart data.
+    Only supports current season + 2 previous seasons.
     """
     try:
+        # Validate season
+        season_year = validate_season(season)
+
         service = PlayerService(db)
         player = service.get_player_by_slug(player_slug)
 
         # Build filters
         filters = {}
-        if season:
-            filters['season'] = season
+        filters['season'] = season_year
         if opponent:
             filters['opponent'] = opponent.upper()
         if is_home is not None:
             filters['is_home'] = is_home
 
         # Get season average
-        current_season = season or 2025
-        season_avg = service.get_season_average(player_slug, current_season, stat_category)
+        season_avg = service.get_season_average(player_slug, season_year, stat_category)
 
         # Get graph average (for displayed games only)
         graph_avg = service.get_graph_average(player_slug, stat_category, games, filters)
