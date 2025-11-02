@@ -87,6 +87,7 @@ class GameLog(Base):
     # Game identification
     game_date = Column(Date, nullable=False, index=True)
     season = Column(Integer, nullable=False)
+    player_team = Column(String(3))  # Team player was on for THIS game (handles trades)
     opponent = Column(String(3), nullable=False)
     is_home_game = Column(Boolean, nullable=False)
     game_result = Column(String(1))  # 'W' or 'L'
