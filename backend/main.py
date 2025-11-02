@@ -7,6 +7,7 @@ import models
 from services.player_service import PlayerService
 from services.scraper_service import ScraperService
 from utils import get_current_season_year, season_display_name, validate_season, get_allowed_seasons
+from routers import admin
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -16,6 +17,9 @@ app = FastAPI(
     description="PropsMadness-style NBA player stats tracking with smart caching",
     version="1.0.0"
 )
+
+# Include routers
+app.include_router(admin.router)
 
 # CORS for frontend
 app.add_middleware(
