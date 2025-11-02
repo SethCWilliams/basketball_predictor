@@ -226,17 +226,51 @@ class PlayerService:
         }
 
     def search_players(self, query: str, limit: int = 10) -> List[Dict]:
-        """Search for players by name"""
+        """
+        Search for players by name.
+        First checks database, then falls back to Basketball Reference API if no results.
+        """
+        # Try database first
         players = self.db.query(models.Player).filter(
             models.Player.full_name.ilike(f'%{query}%')
         ).limit(limit).all()
 
-        return [
-            {
-                'slug': p.player_slug,
-                'name': p.full_name,
-                'position': p.position,
-                'team': p.current_team
-            }
-            for p in players
-        ]
+        if players:
+            # Found players in database
+            return [
+                {
+                    'slug': p.player_slug,
+                    'name': p.full_name,
+                    'position': p.position,
+                    'team': p.current_team
+                }
+                for p in players
+            ]
+
+        # No results in database - fall back to Basketball Reference search
+        try:
+            from basketball_reference_web_scraper import client
+
+            search_results = client.search(term=query)
+            api_players = search_results.get('players', [])
+
+            # Transform API results to match our format
+            results = []
+            for player in api_players[:limit]:  # Limit results
+                # Only include NBA players (filter by leagues if available)
+                leagues = player.get('leagues', set())
+                if leagues and 'NBA' not in str(leagues):
+                    continue
+
+                results.append({
+                    'slug': player.get('identifier', ''),
+                    'name': player.get('name', ''),
+                    'position': None,  # API doesn't provide position in search
+                    'team': None       # API doesn't provide team in search
+                })
+
+            return results
+
+        except Exception as e:
+            print(f"❌ Error searching Basketball Reference API: {e}")
+            return []  # Return empty list on error
