@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nba_tracker_backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///./nba_predictions.db
+      - PYTHONUNBUFFERED=1
+    volumes:
+      # Mount source code for hot reload
+      - ./backend:/app
+      # Persist database in named volume
+      - nba_db_data:/app/nba_predictions_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - nba_network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: nba_tracker_frontend
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    volumes:
+      # Mount source code for hot reload
+      - ./frontend:/app
+      # Don't mount node_modules (use container's version)
+      - /app/node_modules
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - nba_network
+
+volumes:
+  nba_db_data:
+    driver: local
+
+networks:
+  nba_network:
+    driver: bridge
